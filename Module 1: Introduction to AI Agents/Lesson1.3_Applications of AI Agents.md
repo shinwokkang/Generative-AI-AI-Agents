@@ -1,4 +1,4 @@
-# Lesson 1.3: AI 에이전트의 실제 적용 사례 (Applications of AI Agents) 🌟
+# Lesson 1.3: AI 에이전트의 실제 적용 사례 (Applications of AI Agents)
 
 이 레슨에서는 학술 연구, 코드 생성, 자율 웹 브라우징 등 실제 현실 세계에서 성공적으로 적용되고 있는 고도화된 AI 에이전트 시스템의 대표적인 3가지 사례를 살펴봅니다.
 
