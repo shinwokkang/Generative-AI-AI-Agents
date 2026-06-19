@@ -1,4 +1,4 @@
-# Lesson 2.1: 시작하기 - 에이전트 클래스 생성 및 프롬프트 작성 (Creating the Agent Class & Writing Prompts) 🐍
+# Lesson 2.1: 시작하기 - 에이전트 클래스 생성 및 프롬프트 작성 (Creating the Agent Class & Writing Prompts)
 
 이 레슨에서는 파이썬과 OpenAI SDK(GPT-4o-mini)를 활용하여 **ReAct(Reasoning + Acting) 에이전트**를 밑바닥부터 직접 구현해 봅니다. 
 파이썬을 전혀 모르는 초보자도 쉽게 코드를 이해하고 구현할 수 있도록 한 줄 한 줄 주석을 달아 상세히 설명합니다.
