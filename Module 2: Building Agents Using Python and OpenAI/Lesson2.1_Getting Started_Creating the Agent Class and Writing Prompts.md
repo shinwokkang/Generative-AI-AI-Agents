@@ -366,30 +366,25 @@ sequenceDiagram
 
 ---
 
-### 🗂️ ② Stateless LLM과 메시지 누적 구조 (기억력의 원리)
-에이전트가 기억을 유지하기 위해 파이썬 메모리(`messages` 리스트)에 대화를 누적하고 전달하는 흐름입니다.
+### 🗂️ Stateless LLM과 메시지 누적 구조 (기억력의 원리)
+
+파이썬 내부 메모리(`messages` 리스트)에 대화가 어떻게 누적되어 Stateless(기억 상실) 상태인 LLM으로 전달되는지 보여주는 흐름도입니다.
 
 ```mermaid
 graph TD
-    subgraph LocalMemory [파이썬 로컬 메모리 (messages 리스트)]
-        M1["[1] 역할 부여<br>role: system<br>content: '너는 ReAct 에이전트다...'"]
-        M2["[2] 사용자 첫 질문<br>role: user<br>content: '바나나 가격은?'"]
-        M3["[3] 에이전트 첫 출력<br>role: assistant<br>content: 'Action: get_fruit_price: banana'"]
-    end
-
-    subgraph LLM [OpenAI API (Stateless Brain)]
-        Brain((GPT-4o-mini))
-    end
-
-    M1 -->|1. 리스트에 저장| LocalMemory
-    M2 -->|2. 질문 오면 누적| LocalMemory
-    LocalMemory -->|3. 리스트 전체를 전달| LLM
-    LLM -->|4. 응답 생성| M3
-    M3 -->|5. 리스트에 누적 저장| LocalMemory
+    M1["[1] system: '너는 ReAct 에이전트다...'"] --> Memory["messages 리스트 (메모리)"]
+    M2["[2] user: '바나나 가격은?'"] --> Memory
     
-    style LocalMemory fill:#f9f9f9,stroke:#333,stroke-width:1px
+    Memory -->|"대화 기록 전체 전달 (1 + 2)"| LLM["OpenAI API (Stateless)"]
+    
+    LLM -->|"[3] 응답 생성"| M3["assistant: 'Action: get_fruit_price: banana'"]
+    M3 -->|"리스트 맨 뒤에 추가"| Memory
+
+    style Memory fill:#f9f9f9,stroke:#333,stroke-width:1.5px
     style LLM fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
 ```
+
+이와 같이 모든 기록이 `messages` 리스트에 누적되어 저장되며, 매 요청마다 이 리스트 전체가 LLM으로 다시 전달되기 때문에 에이전트가 이전의 대화나 생각(Thought)을 기억하는 것처럼 작동하게 됩니다.
 
 ---
 
