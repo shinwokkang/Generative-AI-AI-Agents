@@ -8,62 +8,28 @@
 
 AI 애플리케이션의 동작 방식은 인간이 미리 짜놓은 고정 코드(하드코딩)에서 출발하여, LLM이 모든 제어 흐름을 주도하는 완전 자율 시스템으로 진화하고 있습니다.
 
-```mermaid
-graph TD
-    subgraph HumanDriven ["1. 인간 중심 (Human-driven) 영역"]
-        L1["Level 1: 순수 인간 제어 코드 <br> (정적 규칙 기반)"]
-        L2["Level 2: 단일 단계 LLM 호출 <br> (단순 응답 생성)"]
-        L3["Level 3: 여러 단계 체인 & 라우터 <br> (LangChain 주 작동 영역)"]
-    end
+![Levels of Autonomy](images/levels_of_autonomy.png)
 
-    subgraph CriticalLine ["★ 임계 분기점 (사이클/루프 처리 가능 여부)"]
-        CL["-------------------------------------------------"]
-    end
-
-    subgraph AgentExecuted ["2. 에이전트 실행 (Agent-executed) 영역 - LangGraph 타겟"]
-        L4["Level 4: 상태 머신 <br> (동적 루프 및 상태 관리)"]
-        L5["Level 5: 자율 도구 생성 및 기억"]
-        L6["Level 6: 완전 자율형 에이전트 <br> (스스로 목표 및 계획 수립)"]
-    end
-
-    L1 --> L2
-    L2 --> L3
-    L3 -.-> CL
-    CL -.-> L4
-    L4 --> L5
-    L5 --> L6
-
-    style CriticalLine fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray: 5 5
-    style AgentExecuted fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px
-```
-
-* **LangChain의 한계:** 기존의 LangChain은 주로 **Level 3 (체인 및 단순 라우터)** 단계에서 작동하도록 최적화되어 있어, 사이클이 빈번하고 고도로 복잡한 자율 제어를 감당하기 어렵습니다.
-* **LangGraph의 영역:** **Level 4 ~ Level 6**의 고수준 자율 제어 영역에서 상태를 보존하고 루프를 지능적으로 제어하는 데 최적화되어 있습니다.
+### 💡 자율성 레벨별 제어 주체 비교
+* **Level 1 (Code):** 어떤 단계의 결과를 낼지, 어떤 단계를 밟을지, 어떤 도구가 사용 가능한지 **모두 인간이 코드로 사전에 결정**합니다.
+* **Level 2 (LLM Call):** 단일 단계의 출력 내용만 LLM이 결정하고, 이후 단계는 인간의 코드가 통제합니다.
+* **Level 3 (Chain):** 여러 단계에 걸쳐 출력은 LLM이 결정하지만, 실행 경로는 여전히 인간의 정적 코드가 주도합니다. (주로 LangChain이 작동하는 수준)
+* **Level 4 (Router):** 입력에 따라 어떤 실행 흐름(경로)으로 보낼지(Decide Which Steps to Take)를 LLM이 결정하기 시작합니다. 단, 되풀이(Cycles)는 없습니다.
+* **Level 5 (State Machine):** LLM이 단계의 결과뿐만 아니라, **루프(Cycles)를 포함하여 어떤 단계를 더 실행해야 할지 스스로 결정**합니다. (LangGraph 주 활약 영역)
+* **Level 6 (Autonomous):** 어떤 단계들을 사용할 수 있는지(Decide What Steps are Available to Take) 도구의 세트까지 LLM이 스스로 자율 결정하고 통제합니다.
 
 ---
 
 ## 2. 자율성(Autonomy) vs 신뢰성(Reliability)의 절충(Trade-off)
 
-AI 시스템을 설계할 때 직면하는 가장 큰 절충 관계는 **"에이전트의 제어권을 넓혀줄수록 전체 시스템의 신뢰성과 결과의 예측 가능성이 급격히 떨어진다"**는 사실입니다.
+AI 시스템을 설계할 때 직면하는 가장 큰 절충 관계는 **"에이전트에게 제어 자율성을 많이 부여할수록(Agent's level of control) 전체 시스템의 신뢰성(Application reliability)은 급격히 떨어진다"**는 점입니다.
 
-```mermaid
-graph LR
-    subgraph TraditionalConstraint ["전통적인 AI 시스템의 한계 곡선"]
-        A["[제한된 자율성 / 높은 신뢰성]<br>단순 라우터 기법"] --- B["[고도의 자율성 / 매우 낮은 신뢰성]<br>완전 자율형 에이전트"]
-    end
+![Reliability vs Control](images/reliability_vs_control.png)
 
-    subgraph LangGraphSolution ["LangGraph가 해결한 스위트 스팟 (Sweet Spot)"]
-        LG["★ LangGraph의 핵심 가치<br>(안정적인 상태 제어로 고도의 자율성과 고신뢰성을 동시 달성)"]
-    end
-
-    B -.->|격차 극복| LG
-    A -.->|신뢰성 유지하며 기능 확장| LG
-
-    style LG fill:#ffebee,stroke:#c62828,stroke-width:2px
-```
-
-* **전통적인 접근법:** 에이전트가 자유롭게 판단할 수 있는 범위를 늘려주면(자율성 향상), 결과물이 엇나가거나 무한 루프에 빠지는 등 신뢰성이 붕괴됩니다.
-* **LangGraph의 해결책 (빨간색 화살표):** 정교하게 제어되는 그래프 아키텍처와 상태 검증 장치를 엮어, **더 높은 자율성을 가지면서도 프로덕션 환경에 바로 투입할 수 있는 신뢰성(Reliability)을 유지**해 줍니다.
+* **전통적인 한계 곡선 (검은색 실선):**
+  * 에이전트의 제어권(Autonomy)이 높아질수록 예상치 못한 예외 상태에 빠지거나 무한 루프를 돌면서 신뢰성이 급감합니다.
+* **LangGraph의 해결책 (빨간색 화살표):**
+  * 정밀한 그래프 설계, 상태 제어, 예외 상태 복구 로직 등을 통해 **에이전트의 자율적 제어 수준을 극대화하면서도, 프로덕션 투입이 가능할 정도의 고신뢰성을 유지**하도록 이 격차를 메워 줍니다.
 
 ---
 
