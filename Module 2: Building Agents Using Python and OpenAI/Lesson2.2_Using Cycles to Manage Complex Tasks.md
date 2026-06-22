@@ -1,4 +1,5 @@
-# Lesson 2.2: 사이클을 활용한 복잡한 작업 관리 (Using Cycles to Manage Complex Tasks) 🔄
+# Lesson 2.2: 사이클을 활용한 복잡한 작업 관리 
+(Using Cycles to Manage Complex Tasks) 🔄
 
 이 레슨에서는 단일 실행 흐름의 한계를 극복하고, 에이전트가 목표를 달성할 때까지 **생각 ➡️ 행동 ➡️ 관찰**의 흐름을 반복할 수 있도록 하는 **사이클(Cycles, 루프)**을 구현합니다. 파이썬 코드를 한 줄 한 줄 뜯어보며 에이전트가 어떻게 스스로 상태를 관리하고 복잡한 다단계 문제를 완수하는지 학습합니다.
 
@@ -160,3 +161,75 @@ Answer: The total cost for 10 apples, 10 bananas, and 2 oranges is $29.60.
 * **ReAct의 코드 구현체 이해:** `Agent` 클래스를 정의하고 대화 히스토리(`messages`)를 API 호출 시 누적해 넘겨줌으로써 문맥 유지가 가능하도록 만들었습니다.
 * **프롬프트 디자인 및 도구 매핑:** `Thought`, `Action`, `PAUSE`, `Observation` 규칙을 Few-shot 기법으로 학습시켜, 에이전트가 규격화된 도구 실행 요구 사항을 출력하도록 유도했습니다.
 * **사이클의 제어:** `while` 루프와 최대 실행 제한(`max_turns`) 장치를 통해 에이전트가 실패한 부분은 재시도하고, 여러 단계를 끊김 없이 엮어 최종 답변을 낼 수 있도록 하는 피드백 기반 **자율 에이전트 시스템**을 완성했습니다.
+
+
+
+---
+
+## 1. Lesson 2.2에서 꼭 알아야 하는 핵심 3가지
+
+### ① `while` 루프와 `max_turns` (무한 루프 제동 장치)
+에이전트가 최종 답을 내기 전까지 쿼리 함수를 계속 반복 실행하기 위해 파이썬의 `while` 루프를 사용합니다. 
+이때 에이전트가 동일한 생각과 행동을 무한히 반복하는 오류(뫼비우스의 띠)에 빠지지 않도록, **`max_turns`라는 최대 제한 횟수(예: 5회)**를 설정하여 시스템이 안전하게 멈출 수 있는 **제동 장치**를 설계해야 합니다.
+
+### ② `next_prompt` 피드백 루프 (관찰값의 입력 재주입)
+에이전트가 다단계 문제를 풀기 위해서는 **이전 단계의 실행 결과(`Observation`)**를 알아야 합니다. 
+파이썬 코드에서 외부 함수를 실행해 얻은 결과(`Observation: $1.2`)를 `next_prompt` 변수에 담아 **LLM의 다음 입력값으로 다시 주입**해 주는 피드백 메커니즘이 루프의 핵심 원리입니다.
+
+### ③ 실무적인 LLM 설정법 (온도와 모델 등급)
+* **온도(Temperature) = 0:** 에이전트가 매번 다르게 행동하면 시스템이 불안정해지므로, 일관되고 예측 가능한 답변을 얻기 위해 온도를 `0`으로 고정합니다.
+* **모델 체급 조절:** 다단계 추론이 복잡해질수록 똑똑한 모델(예: GPT-4o)이 필요하며, 비용 절감을 위해 단순 작업은 경량 모델(GPT-4o-mini)에 분산시키는 하이브리드 설계가 유용합니다.
+
+---
+
+## 2. 시각 자료로 이해하는 루프(Cycles) 메커니즘
+
+### 📊 ① ReAct 에이전트의 다중 턴 루프 흐름 (Lesson 2.2)
+"바나나 2개의 가격은?"이라는 질문을 받았을 때, 에이전트가 루프를 돌며 최종 정답에 도달하는 과정을 나타낸 시퀀스 다이어그램입니다.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 사용자
+    participant App as 파이썬 애플리케이션 (while 루프)
+    participant Agent as 에이전트 객체 (LLM/Brain)
+    participant Tool as 외부 도구 (파이썬 함수)
+
+    User->>App: "바나나 2개 가격은?" (최초 질문)
+    
+    rect rgb(240, 248, 255)
+    Note over App: [Turn 1] i=1
+    App->>Agent: "바나나 2개 가격은?" 전달
+    Note over Agent: Thought 1:<br>"단가 조회가 필요하군."
+    Agent-->>App: Action: get_fruit_price: banana & PAUSE 반환
+    App->>Tool: get_fruit_price("banana") 실행
+    Tool-->>App: Observation: "$1.2" 획득
+    end
+
+    rect rgb(245, 245, 245)
+    Note over App: [Turn 2] i=2<br>관찰값을 next_prompt에 담아 LLM에 재전송
+    App->>Agent: "Observation: The price is $1.2" 전달
+    Note over Agent: Thought 2:<br>"바나나 1개에 $1.2이니 2개 가격을 계산하자."
+    Agent-->>App: Action: calculate_total_price: banana: 2 & PAUSE 반환
+    App->>Tool: calculate_total_price("banana: 2") 실행
+    Tool-->>App: Observation: "$2.40" 획득
+    end
+
+    rect rgb(230, 245, 230)
+    Note over App: [Turn 3] i=3<br>최종 결과를 next_prompt에 담아 LLM에 재전송
+    App->>Agent: "Observation: The total price is $2.40" 전달
+    Note over Agent: Thought 3:<br>"모든 데이터를 확보했다."
+    Agent-->>App: "Answer: 바나나 2개 가격은 $2.40입니다." 반환 (Action 없음)
+    end
+
+    App-->>User: "바나나 2개 가격은 $2.40입니다." 최종 답변 전달
+```
+
+---
+
+### 💡 요약하자면
+* **외울 필요 없는 것:** `while i < max_turns:` 내부에서 정규식을 쪼개고 `known_actions[action](action_input)`을 호출하는 파이썬의 동적 바인딩 로직.
+* **반드시 알아야 하는 것:** 
+  1. 루프가 없으면 여러 개의 외부 도구를 순차적으로 실행할 수 없다는 것.
+  2. 도구의 실행 결과(`Observation`)를 다시 LLM에 전달하여 **다음 행동의 재료**로 삼게 만드는 상태 피드백 구조.
+  3. 무한 루프를 막기 위해 최대 반복 수(`max_turns`)를 제어해 주어야 한다는 것.
