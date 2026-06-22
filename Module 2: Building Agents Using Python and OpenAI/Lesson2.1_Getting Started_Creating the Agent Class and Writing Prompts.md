@@ -306,3 +306,96 @@ Observation: The price of a banana is $1.2
   3. 파이썬 헬퍼 함수가 함수를 실행하여 `Observation: The price of a banana is $1.2`를 획득합니다.
   4. **그러나 여기서 완전히 멈춰버립니다.** 
   5. 오렌지 가격을 조회하는 다음 액션과 최종 가격을 계산하는 액션 단계로 나아가지 못합니다. 왜냐하면 헬퍼 함수에 **에이전트를 다시 호출하고 관찰값을 넘겨주는 루프(Cycles)** 구조가 설계되어 있지 않기 때문입니다.
+ 
+
+
+
+결론부터 말씀드리면, **코드를 외우실 필요는 절대 없습니다.** 
+
+실무에서는 이 강의에서 다룬 밑바닥 코딩(정규표현식 파싱, 딕셔너리 함수 매핑 등)을 **LangGraph** 같은 전문 프레임워크가 내부적으로 모두 알아서 처리해 줍니다. 따라서 개발자가 이 코드를 직접 타이핑하며 외울 필요는 전혀 없으며, 코드 대신 **‘에이전트가 어떤 원리로 움직이는지’에 대한 핵심 메커니즘**만 이해하시면 충분합니다.
+
+Lesson 2.1에서 반드시 알고 넘어가야 할 핵심 개념과 이를 시각화한 그림을 정리해 드립니다.
+
+---
+
+## 1. Lesson 2.1에서 꼭 알아야 하는 핵심 4가지
+
+### ① Stateless LLM과 대화 기록(Memory)의 누적
+API로 호출하는 LLM은 기본적으로 **'이전 대화를 기억하지 못하는 상태(Stateless)'**입니다. 
+따라서 에이전트가 문맥을 이어가게 하려면 우리가 코드 상에서 `self.messages = []`라는 리스트를 만들고, 송수신한 모든 메시지를 차곡차곡 쌓아서 **매번 API를 호출할 때마다 전체 대화 기록을 통째로 넘겨주어야 합니다.**
+
+### ② 프롬프트를 통한 규칙 부여 (Few-shot)
+에이전트에게 똑똑하게 행동하라고 지시하기 위해 프롬프트로 **"생각(Thought) ➡️ 행동(Action) ➡️ 일시정지(PAUSE) ➡️ 관찰(Observation)"** 패턴을 주입합니다. 이처럼 예시 세션을 프롬프트에 직접 적어 넣어 LLM이 정해진 포맷대로만 출력하게 가이드하는 기법을 **퓨샷(Few-shot) 프롬프팅**이라고 합니다.
+
+### ③ LLM은 도구를 직접 실행하지 않는다 (PAUSE의 의미)
+많은 입문자가 오해하는 부분입니다. LLM은 파이썬 코드를 직접 돌리거나 DB에 접속하지 못합니다. LLM이 하는 일은 오직 **"Action: get_fruit_price: banana"라는 텍스트를 출력하고 멈추는 것(PAUSE)**뿐입니다.
+실제 실행은 우리의 파이썬 프로그램(`query` 함수)이 이 텍스트를 읽고(정규표현식 파싱), 실제 함수를 실행하여 결과(`Observation`)를 다시 LLM에게 문자로 적어서 건네주는 것입니다.
+
+### ④ 루프(Cycles)가 없는 선형 흐름의 한계
+Lesson 2.1의 `query` 함수는 한 번 질문을 던지고, 에이전트가 행동을 출력하면 그것을 파이썬 코드가 한 번 실행해 주는 것에서 끝납니다. 이처럼 **루프(while 문)가 없으면 에이전트는 다단계 추론을 하지 못하고 첫 번째 행동만 취한 채 멈추게 됩니다.**
+
+---
+
+## 2. 시각 자료로 이해하는 에이전트 메커니즘
+
+### 📊 ① ReAct 에이전트의 단일 선형 실행 흐름 (Lesson 2.1)
+Lesson 2.1에서 작성한 코드가 어떻게 순차적으로 실행되고 어디서 멈추는지 보여주는 흐름도입니다.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 사용자
+    participant App as 파이썬 애플리케이션 (query 함수)
+    participant Agent as 에이전트 객체 (LLM/Brain)
+    participant Tool as 외부 도구 (파이썬 함수)
+
+    User->>App: "바나나 2개 가격은?" (질문 입력)
+    App->>Agent: 시스템 지침(Prompt) + 질문 전달
+    Note over Agent: 뇌 작동 (Thought)<br>"바나나 단가부터 조회해야겠군."
+    Agent-->>App: Thought & Action 텍스트 반환 ("Action: get_fruit_price: banana") 후 PAUSE
+    
+    rect rgb(240, 240, 240)
+    Note over App: 애플리케이션이 정규식(action_re)으로<br>도구명과 파라미터를 캡처
+    App->>Tool: get_fruit_price("banana") 호출
+    Tool-->>App: "The price of a banana is $1.2" (결과 반환)
+    end
+
+    App-->>User: Observation 결과 출력 후 즉시 종료
+    Note over User: ⚠️ [루프가 없어서 발생한 문제]<br>단가는 알아냈지만 최종 금액($2.4) 계산은 실행되지 못하고 끝남!
+```
+
+---
+
+### 🗂️ ② Stateless LLM과 메시지 누적 구조 (기억력의 원리)
+에이전트가 기억을 유지하기 위해 파이썬 메모리(`messages` 리스트)에 대화를 누적하고 전달하는 흐름입니다.
+
+```mermaid
+graph TD
+    subgraph LocalMemory [파이썬 로컬 메모리 (messages 리스트)]
+        M1["[1] 역할 부여<br>role: system<br>content: '너는 ReAct 에이전트다...'"]
+        M2["[2] 사용자 첫 질문<br>role: user<br>content: '바나나 가격은?'"]
+        M3["[3] 에이전트 첫 출력<br>role: assistant<br>content: 'Action: get_fruit_price: banana'"]
+    end
+
+    subgraph LLM [OpenAI API (Stateless Brain)]
+        Brain((GPT-4o-mini))
+    end
+
+    M1 -->|1. 리스트에 저장| LocalMemory
+    M2 -->|2. 질문 오면 누적| LocalMemory
+    LocalMemory -->|3. 리스트 전체를 전달| LLM
+    LLM -->|4. 응답 생성| M3
+    M3 -->|5. 리스트에 누적 저장| LocalMemory
+    
+    style LocalMemory fill:#f9f9f9,stroke:#333,stroke-width:1px
+    style LLM fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+```
+
+---
+
+### 💡 요약하자면
+* **외울 필요 없는 것:** 정규표현식 매칭 코드(`re.compile`), 문자열 파싱 코드(`.split(': ')`), OpenAI API 호출 문법.
+* **반드시 알아야 하는 것:** 
+  1. API는 대화 이력을 기억하지 못하므로 리스트에 대화를 누적해 전달해야 한다는 점.
+  2. LLM은 직접 도구를 돌리지 못하고 텍스트 지시(`Action`)만 내린다는 점.
+  3. 에이전트가 다단계 문제를 풀기 위해서는 이 `Thought ➡️ Action ➡️ Observation` 과정을 반복하는 **루프(Cycles)**를 파이썬 코드단에서 제어해 주어야 한다는 점.
