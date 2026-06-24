@@ -195,38 +195,191 @@ LangGraph에서 제공하는 `agent_graph.get_graph().draw_mermaid_png()` 호출
 
 ## 🛠️ 실습: 시나리오별 멀티스텝 추론 실행 흐름 추적
 
-사용자 쿼리가 에이전트로 들어갔을 때의 내부 실행 흐름과 입력 바인딩 구조를 추적합니다.
-
-### 📌 시나리오 A: "싱가포르 F1 레이스 최근 우승자 조회"
-* **사용자 입력:** `"Who won the most recent F1 race in Singapore?"`
-
-#### 1단계: 시간 기준점 파악 (State 1)
-* **상태:** 에이전트는 '가장 최근(most recent)'이라는 상대적 시간을 해석하기 위해 시간 데이터가 선행되어야 함을 독스트링을 통해 인지합니다.
-* **행동:** `get_current_date` 도구를 최우선으로 호출합니다.
-* **관찰 (Observation):** `"November 16, 2026"` (시스템 날짜 반환)
-
-#### 2단계: 검색 쿼리 변환 및 웹 검색 실행 (State 2)
-* **상태:** 현재 시점(2026년 11월)을 기준으로 최근 개최된 싱가포르 그랑프리는 2026년 시즌 혹은 직전 시즌임을 식별합니다.
-* **행동:** Tavily 웹 검색 도구에 보낼 쿼리를 `"Singapore Grand Prix 2026 winner"` 또는 `"Singapore Grand Prix 2025 winner"` 등으로 상세화하여 전송합니다.
-* **관찰 (Observation):** F1 싱가포르 그랑프리 경기 결과 데이터를 수집합니다.
-
-#### 3단계: 최종 가공 답변 생성 (State 3)
-* **행동:** 검색 결과로부터 사실 정보(Fact)를 파싱하여 사용자에게 마크다운 형식의 최종 텍스트 답변을 구성한 뒤 `__end__`로 이동합니다.
+사용자 쿼리가 에이전트에 입력되었을 때, LangGraph의 상태(State) 객체가 어떻게 변경되고 각 컴포넌트가 어떤 JSON 규격의 인자를 주고받는지 단계별로 정밀 추적합니다.
 
 ---
 
-### 📌 시나리오 B: "내일 도쿄 날씨 예보 조회"
-* **사용자 입력:** `"What is the weather like in Tokyo tomorrow?"`
+### 📌 시나리오 A: "싱가포르 F1 레이스 최근 우승자 조회"
 
-#### 1단계: 기준 날짜 계산 (State 1)
-* **상태:** '내일(tomorrow)'을 특정하기 위해 기준일 정보가 필요합니다.
-* **행동:** `get_current_date` 도구를 호출합니다.
-* **관찰 (Observation):** `"November 16, 2026"`
+* **사용자 입력 (원시 쿼리):** `"Who won the most recent F1 race in Singapore?"`
+* **기준 서버 시점:** `2026-11-16`
 
-#### 2단계: 일기 예보 검색 실행 (State 2)
-* **상태:** 현재 날짜인 11월 16일의 다음 날인 '11월 17일'을 명확한 목적 날짜로 계산합니다.
-* **행동:** Tavily 검색 도구에 `"Tokyo weather forecast November 17, 2026"` 쿼리를 전송합니다.
-* **관찰 (Observation):** 2026년 11월 17일의 기온, 강수 확률, 구름 상태 등의 텍스트 조각을 반환받습니다.
+#### 1단계: 초기 진입 및 시간 기준점 파악 (`State 1` ➡️ `State 2`)
 
-#### 3단계: 가독성 있는 마크다운 응답 (State 3)
-* **행동:** 정제된 기상 정보를 종합하여 사용자 브라우저 뷰어에 최적화된 형식으로 문장을 포맷팅해 반환하고 흐름을 종료합니다.
+```mermaid
+sequenceDiagram
+    participant State as 그래프 상태 (State)
+    participant LLM as agent 노드 (LLM)
+    participant Tool as tools 노드 (get_current_date)
+
+    State->>LLM: HumanMessage 주입
+    Note over LLM: 'most recent' 구문 감지<br/>독스트링 규칙에 의거 날짜 검색 결정
+    LLM->>State: AIMessage(tool_calls=[get_current_date]) 반환
+    State->>Tool: tool_calls 정보 전달
+    Tool->>State: ToolMessage("November 16, 2026") 적재
+```
+
+* **상태 (State) 메시지 목록:**
+  ```python
+  [
+      HumanMessage(content="Who won the most recent F1 race in Singapore?")
+  ]
+  ```
+* **`agent` 노드 처리**: 
+  * 모델은 입력 쿼리 내의 `'most recent'`(가장 최근의)라는 표현이 상대적 시점을 지칭하므로, 절대적인 기준 시간 정보가 없으면 검색 결과를 신뢰할 수 없다고 판단합니다.
+  * `get_current_date` 도구의 스키마 명세에 명시된 독스트링 규칙에 의거하여 이 도구를 가장 먼저 실행하기로 결정합니다.
+* **모델 출력 (`AIMessage`):**
+  ```json
+  {
+    "content": "",
+    "tool_calls": [
+      {
+        "name": "get_current_date",
+        "args": {},
+        "id": "call_abc123"
+      }
+    ]
+  }
+  ```
+* **`tools` 노드 처리**: `get_current_date` 함수가 구동되어 시스템 날짜인 `"November 16, 2026"`을 반환합니다.
+* **상태 업데이트 결과 (리듀서 동작):**
+  ```python
+  [
+      HumanMessage(content="Who won the most recent F1 race in Singapore?"),
+      AIMessage(content="", tool_calls=[{"name": "get_current_date", "id": "call_abc123"}]),
+      ToolMessage(content="November 16, 2026", tool_call_id="call_abc123")
+  ]
+  ```
+
+---
+
+#### 2단계: 기준 날짜 기반의 타겟 정보 검색 (`State 2` ➡️ `State 3`)
+
+* **`agent` 노드 처리**:
+  * 입력된 전체 메시지 히스토리를 대입받아 추론을 시작합니다.
+  * 상태에 추가된 `ToolMessage`의 날짜 `"November 16, 2026"` 정보를 파악하고, '최근 싱가포르 그랑프리'가 **2026년 시즌** 경기 정보임을 식별합니다.
+  * 검색 최적화를 위해 쿼리를 정형화하여 `tavily_search_tool`을 호출합니다.
+* **모델 출력 (`AIMessage`):**
+  ```json
+  {
+    "content": "",
+    "tool_calls": [
+      {
+        "name": "tavily_search_tool",
+        "args": {
+          "query": "Singapore Grand Prix 2026 winner"
+        },
+        "id": "call_def456"
+      }
+    ]
+  }
+  ```
+* **`tools` 노드 처리**: Tavily API를 사용하여 웹 문서 조각을 수집합니다.
+* **상태 업데이트 결과 (리듀서 동작):**
+  ```python
+  [
+      # ... (이전 메시지 생략) ...
+      AIMessage(content="", tool_calls=[{"name": "tavily_search_tool", "id": "call_def456"}]),
+      ToolMessage(content="[검색 결과 본문] Lando Norris won the 2026 Singapore Grand Prix...", tool_call_id="call_def456")
+  ]
+  ```
+
+---
+
+#### 3단계: 최종 팩트 기반 응답 생성 (`State 3` ➡️ `__end__`)
+
+* **`agent` 노드 처리**:
+  * 상태 데이터에 기록된 Tavily 검색 결과를 바탕으로 답변을 완성합니다.
+  * `tool_calls` 필드가 없는 순수 텍스트 답변을 출력합니다.
+* **모델 출력 (`AIMessage`):**
+  ```python
+  AIMessage(content="2026년 싱가포르 그랑프리의 우승자는 랜도 노리스(Lando Norris)입니다.")
+  ```
+* **결과**: `tool_calls`가 존재하지 않으므로 조건부 에지는 최종 답변을 전달하고 `__end__` 노드로 흐름을 이송해 프로세스를 마감합니다.
+
+---
+
+### 📌 시나리오 B: "내일 도쿄의 날씨 예보 조회"
+
+* **사용자 입력 (원시 쿼리):** `"What is the weather like in Tokyo tomorrow?"`
+* **기준 서버 시점:** `2026-11-16`
+
+#### 1단계: 날짜 기준 계산을 위한 도구 기동 (`State 1` ➡️ `State 2`)
+
+* **상태 (State) 메시지 목록:**
+  ```python
+  [
+      HumanMessage(content="What is the weather like in Tokyo tomorrow?")
+  ]
+  ```
+* **`agent` 노드 처리**:
+  * `'tomorrow'`(내일)라는 표현을 처리하려면 우선 오늘 날짜를 확인해야 한다고 인식합니다.
+  * 시간 관련 추론을 선점하기 위해 `get_current_date` 도구를 지정하여 호출 명령을 생성합니다.
+* **모델 출력 (`AIMessage`):**
+  ```json
+  {
+    "content": "",
+    "tool_calls": [
+      {
+        "name": "get_current_date",
+        "args": {},
+        "id": "call_xyz789"
+      }
+    ]
+  }
+  ```
+* **`tools` 노드 처리**: 로컬 날짜 계산 함수가 `"November 16, 2026"` 문자열을 반환합니다.
+* **상태 업데이트 결과:**
+  ```python
+  [
+      HumanMessage(content="What is the weather like in Tokyo tomorrow?"),
+      AIMessage(content="", tool_calls=[{"name": "get_current_date", "id": "call_xyz789"}]),
+      ToolMessage(content="November 16, 2026", tool_call_id="call_xyz789")
+  ]
+  ```
+
+---
+
+#### 2단계: 내일 날짜 연산 및 특정 날씨 검색 (`State 2` ➡️ `State 3`)
+
+* **`agent` 노드 처리**:
+  * 시스템 기준일(11월 16일) 데이터를 바탕으로 '내일'이 **2026년 11월 17일**임을 수치 계산합니다.
+  * 위치("Tokyo")와 날짜("November 17, 2026") 정보를 결합하여 검색 쿼리를 조합합니다.
+* **모델 출력 (`AIMessage`):**
+  ```json
+  {
+    "content": "",
+    "tool_calls": [
+      {
+        "name": "tavily_search_tool",
+        "args": {
+          "query": "Tokyo weather forecast November 17, 2026"
+        },
+        "id": "call_qwe987"
+      }
+    ]
+  }
+  ```
+* **`tools` 노드 처리**: Tavily 웹 검색 엔진에 쿼리를 송신하고, 해당 날짜의 도쿄 일기 예보(온도, 강수량, 기압 데이터 등) 본문을 검색하여 수집합니다.
+* **상태 업데이트 결과:**
+  ```python
+  [
+      # ... (이전 메시지 생략) ...
+      AIMessage(content="", tool_calls=[{"name": "tavily_search_tool", "id": "call_qwe987"}]),
+      ToolMessage(content="[검색 결과 본문] The weather in Tokyo on November 17, 2026 is forecast to be mostly cloudy with a high of 18 degrees...", tool_call_id="call_qwe987")
+  ]
+  ```
+
+---
+
+#### 3단계: 일기 예보 데이터 정형화 및 출력 (`State 3` ➡️ `__end__`)
+
+* **`agent` 노드 처리**:
+  * 최종 검색된 기상 정보를 기반으로 사용자가 읽기 적합한 한글 문장 양식으로 요약 정리합니다.
+* **모델 출력 (`AIMessage`):**
+  ```python
+  AIMessage(content="2026년 11월 17일 도쿄의 날씨는 대체로 흐릴 것으로 예상되며, 최고 기온은 18도 안팎입니다.")
+  ```
+* **결과**: 추가적인 `tool_calls` 데이터가 존재하지 않으므로 조건부 라우터 에지가 작동을 종료하고 `__end__` 상태로 상태 기계를 종료합니다.
+
+---
