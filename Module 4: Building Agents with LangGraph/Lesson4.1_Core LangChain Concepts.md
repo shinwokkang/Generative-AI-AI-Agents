@@ -145,10 +145,10 @@ chain = prompt | model | parser
 
 ```mermaid
 graph LR
-    Input["1. 입력 데이터 <br> (Dictionary 형식)"] -->|전달| Prompt["2. 프롬프트 템플릿 <br> (ChatPromptTemplate)"]
-    Prompt -->|포맷팅 완료 메시지| LLM["3. 언어 모델 <br> (ChatOpenAI)"]
-    LLM -->|원시 AI 응답 <br> (AIMessage)| Parser["4. 아웃풋 파서 <br> (StringOutputParser)"]
-    Parser --> Output["5. 최종 가공 데이터 <br> (Clean String / JSON)"]
+    Input["1. 입력 데이터 <br> (Dictionary 형식)"] -->|"전달"| Prompt["2. 프롬프트 템플릿 <br> (ChatPromptTemplate)"]
+    Prompt -->|"포맷팅 완료 메시지"| LLM["3. 언어 모델 <br> (ChatOpenAI)"]
+    LLM -->|"원시 AI 응답 <br> (AIMessage)"| Parser["4. 아웃풋 파서 <br> (StringOutputParser)"]
+    Parser -->|"최종 가공 데이터"| Output["5. 최종 가공 데이터 <br> (Clean String / JSON)"]
 
     style Prompt fill:#e8f5e9,stroke:#2e7d32
     style LLM fill:#e3f2fd,stroke:#1e88e5
@@ -215,9 +215,9 @@ sequenceDiagram
 ```mermaid
 graph TD
     %% 데이터 흐름 및 타입 변화 시각화
-    Input["1. 입력 (Dictionary)<br>{'destination': 'Paris', 'preferences': '...' }"] -->|dict 주입| Prompt["2. ChatPromptTemplate<br>(ChatPromptValue 타입 변환)"]
-    Prompt -->|List[BaseMessage] 전달| Model["3. ChatOpenAI (gpt-4o)<br>(AIMessage 타입 반환)"]
-    Model -->|AIMessage 전달| Parser["4. StringOutputParser<br>(str 타입 파싱)"]
+    Input["1. 입력 (Dictionary)<br>{'destination': 'Paris', 'preferences': '...' }"] -->|"dict 주입"| Prompt["2. ChatPromptTemplate<br>(ChatPromptValue 타입 변환)"]
+    Prompt -->|"List[BaseMessage] 전달"| Model["3. ChatOpenAI (gpt-4o)<br>(AIMessage 타입 반환)"]
+    Model -->|"AIMessage 전달"| Parser["4. StringOutputParser<br>(str 타입 파싱)"]
     Parser --> Output["5. 출력 (str)<br>'# Paris Trip Plan...'"]
 
     style Input fill:#fafafa,stroke:#333,stroke-width:1px
