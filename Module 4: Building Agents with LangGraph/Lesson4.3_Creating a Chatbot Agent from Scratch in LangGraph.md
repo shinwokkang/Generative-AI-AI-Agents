@@ -43,7 +43,6 @@ model_with_tools = model.bind_tools(tools)
 ```
 
 ### 🔍 코드 세부 동작 원리
-
 * **`tavily_search_tool`**: 의미론적 웹 검색 API로, 모델이 수집할 수 있는 검색 결과 개수 한도를 `max_results=5`로 통제합니다.
 * **`get_current_date` (독스트링 규칙과 커스텀 도구의 실체)**:
   * **GPT 내장 여부**: 이 도구는 GPT 모델에 원래부터 내장되어 있던 기능이 아닙니다. 파이썬 표준 라이브러리인 `datetime`을 이용하여 개발자가 직접 작성한 **파이썬 커스텀 함수**입니다.
@@ -218,6 +217,7 @@ response = chatbot_graph_with_memory.invoke(
 # 방 번호 식별자를 "room_999"로 다르게 변경하여 동일한 질문을 전송합니다.
 config_other = {"configurable": {"thread_id": "room_999"}}
 
+# 사용자 2가 이전 대화 기억 여부를 확인 (이름을 알려준 적이 없음)
 response_other = chatbot_graph_with_memory.invoke(
     {"messages": [("user", "내 이름이 뭐였지?")]}, 
     config=config_other
@@ -226,6 +226,21 @@ response_other = chatbot_graph_with_memory.invoke(
 ```
 
 * **데이터 제어 단계**:
-  1. **기록 탐색 실패**: 에이전가 `"room_999"` 키로 저장소를 탐색하지만 기존에 저장된 데이터가 존재하지 않습니다.
+  1. **기록 탐색 실패**: 에이전트가 `"room_999"` 키로 저장소를 탐색하지만 기존에 저장된 데이터가 존재하지 않습니다.
   2. **무상태 실행**: 복구된 기록 없이 오직 신규 쿼리인 `[HumanMessage(content="내 이름이 뭐였지?")]` 하나만 상태에 담긴 채 모델에 주입됩니다.
   3. **결과**: 과거 정보를 읽지 못하므로 모델은 이름을 알 수 없다는 고립된 응답을 출력하게 되며, 이로써 사용자 간 대화 기록이 논리적으로 철저히 차단됨이 입증됩니다.
+
+---
+
+## 6. 프리빌트 에이전트(Lesson 4.2) vs 바닥부터 구현하는 방식(Lesson 4.3) 비교
+
+LangGraph에서 제공하는 기성품 에이전트를 선언하는 방식과 모든 상태 노드를 직접 조립하는 아키텍처적 차이점 및 구체적으로 변경된 코드의 특징을 대조하여 정리합니다.
+
+| 분류 항목 | Lesson 4.2 (프리빌트 ReAct 에이전트) | Lesson 4.3 (바닥부터 구현하는 방식) |
+| :--- | :--- | :--- |
+| **그래프 빌드 방식** | `create_react_agent` 함수에 모델과 도구를 던져 내부에서 그래프를 컴파일까지 한 번에 완료합니다. | `StateGraph(State)` 클래스를 인스턴스화하여 도화지 격인 빌더를 만들고, 노드와 에지를 직접 수동으로 설계합니다. |
+| **도구 바인딩 주체** | 프리빌트 함수가 내부에서 자동으로 도구와 모델을 결합합니다. | `model.bind_tools(tools)`를 수동 호출하여 API 규격이 탑재된 모델 인스턴스를 명시적으로 생성합니다. |
+| **상태(State) 정의** | LangGraph 내부의 내장 `AgentState` 구조를 자동 사용하므로 사용자가 데이터 사양을 설계할 필요가 없습니다. | `class State(TypedDict)`를 명시적으로 작성하고 `Annotated[list, add_messages]`를 통해 상태 갱신 리듀서 규칙을 직접 지정합니다. |
+| **노드(Nodes)의 배치** | `agent` 노드와 `tools` 노드가 그래프 컴파일 과정에서 자동으로 추가됩니다. | `chatbot(state)` 함수를 직접 구현하여 `.add_node("chatbot", chatbot)`를 기동하고, `ToolNode(tools)`를 선언하여 수동 등록합니다. |
+| **에지(Edges)의 연결** | 내부 비공개 라우팅 에지가 모델의 `tool_calls` 정보를 분석해 실행 분기를 자동 제어합니다. | `tools_condition` 조건부 라우터를 `.add_conditional_edges("chatbot", tools_condition)`로 수동 주입하고 복귀 에지를 직접 선언합니다. |
+| **커스터마이징 유연성** | 컴포넌트의 내부 동작 구조를 변경하는 데 제약이 따릅니다. | 상태 정보의 구조를 커스텀화하거나 노드 간의 제어 흐름(에지 라우팅 알고리즘)을 사용자 임의대로 수정하기 매우 유리합니다. |
