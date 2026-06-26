@@ -145,55 +145,87 @@ flowchart TD
 
 ## 5. 메모리 세션 기능 통합 및 스레드 제어
 
-컴파일된 에이전트 인스턴스는 한 번 실행(`invoke`)이 끝나면 상태 객체가 파괴되어 이전 대화 내용을 상실합니다. `MemorySaver` 체크포인터를 주입하여 이전 기록을 세션 단위로 보존합니다.
+컴파일된 에이전트 객체는 단발성 실행 구조를 가지기 때문에, 한번 실행(`invoke`)이 종료되면 프로그램 메모리상에 올라가 있던 상태 데이터(대화 내역)가 완전히 파괴되어 다음 실행 시 이전 정보를 기억하지 못합니다. 
+
+이 문제를 해결하기 위해 **`MemorySaver`** 체크포인터를 그래프 컴파일 시점에 결합하여 대화 내역을 세션별로 영구 기록하고 복원하는 흐름을 통합 예시와 함께 확인합니다.
 
 ```python
 from langgraph.checkpoint.memory import MemorySaver
 
-# 1. 인메모리 메모리 저장소 인스턴스화
+# 1. 메모리 저장소 객체를 생성합니다.
 memory = MemorySaver()
 
-# 2. 체크포인터를 지정하여 그래프 재컴파일
+# 2. 컴파일 단계에서 체크포인터 매개변수로 지정합니다.
 chatbot_graph_with_memory = builder.compile(checkpointer=memory)
 ```
 
-### 🔍 스레드 식별자(thread_id)를 활용한 대화방 격리 제어 흐름
+---
 
-여러 명의 사용자가 한 시스템을 이용하더라도 대화 세션 정보가 섞이지 않도록 `thread_id` 값을 다르게 부여하여 독립적인 가상 메모리 채널을 운영합니다.
+### 📝 단일 시나리오로 보는 메모리 저장 및 복원 흐름 (예시: "미나")
 
-#### ➊ 사용자 1 세션 연산 흐름 (`thread_id="user_1"`)
+사용자가 이름을 알려주는 첫 번째 대화와 이름을 다시 물어보는 두 번째 대화가 일어날 때, 백엔드 데이터와 상태 객체가 어떻게 갱신되는지 추적합니다.
+
+#### ➊ 첫 번째 실행: 이름 입력 (`thread_id="room_101"`)
+
 ```python
-# 사용자 1용 세션 식별 컨피그 설정
-config_1 = {"configurable": {"thread_id": "user_1"}}
+# 1. 대화방 식별 정보(컨피그)를 설정합니다.
+config = {"configurable": {"thread_id": "room_101"}}
 
-# 사용자 1이 이름을 전달
+# 2. 첫 번째 질문을 기동합니다.
 chatbot_graph_with_memory.invoke(
-    {"messages": [("user", "Hello, my name is Alice.")]}, 
-    config=config_1
+    {"messages": [("user", "안녕, 내 이름은 미나야.")]}, 
+    config=config
 )
 ```
-* **동작 원리**: `MemorySaver` 저장소 내부에 `"user_1"` 스레드로 인덱싱된 메시지 리스트 공간을 새로 생성하고 `Alice`라는 정보가 포함된 대화 상태를 기록합니다.
+
+* **데이터 제어 단계**:
+  1. **초기 입력**: 상태(`State`)의 `messages` 키값에 `[HumanMessage(content="안녕, 내 이름은 미나야.")]`가 담겨 작동을 시작합니다.
+  2. **챗봇 출력**: 모델이 이를 분석하여 `AIMessage(content="반가워요, 미나님!")`을 출력합니다.
+  3. **상태 누적**: 리듀서 규칙에 의해 상태의 메시지 목록은 `[HumanMessage("안녕, 내 이름은 미나야."), AIMessage("반가워요, 미나님!")]`이 됩니다.
+  4. **영속 저장**: 실행이 종료되는 순간, `MemorySaver`는 이 최종 상태 메시지 리스트를 `"room_101"`이라는 식별자 키와 매핑하여 메모리 데이터베이스에 백업 저장합니다. 저장 후 활성화된 상태는 소멸합니다.
+
+---
+
+#### ➋ 두 번째 실행: 이름 기억 여부 질문 (`thread_id="room_101"`)
 
 ```python
-# 사용자 1이 이전 대화 기억 여부를 확인
-response_1 = chatbot_graph_with_memory.invoke(
-    {"messages": [("user", "What is my name?")]}, 
-    config=config_1
+# 동일한 세션 식별자를 사용하여 두 번째 질문을 기동합니다.
+response = chatbot_graph_with_memory.invoke(
+    {"messages": [("user", "내 이름이 뭐였지?")]}, 
+    config=config
 )
-# 출력 결과: "Your name is Alice."
+# 모델 최종 출력: "미나님의 이름은 미나입니다."
 ```
-* **동작 원리**: `"user_1"` 컨피그를 전달받으면, `MemorySaver`에서 이전에 저장된 대화 히스토리(`"Hello, my name is Alice."`, `"AIMessage"`)를 불러와 현재 질문(`"What is my name?"`)의 바로 앞에 병합한 뒤 LLM에 주입하여 정상 추론 답변을 출력해 줍니다.
 
-#### ➋ 사용자 2 세션 연산 흐름 (`thread_id="user_2"`)
+* **데이터 제어 단계**:
+  1. **이전 기록 자동 복원**: 에이전트는 동작을 시작하자마자 입력된 `config`의 `"room_101"` 키값을 기준으로 `MemorySaver` 저장소를 탐색합니다.
+  2. **상태 데이터 병합**: 저장되어 있던 2개의 메시지 이력(`"안녕, 내 이름은 미나야."`, `"반가워요, 미나님!"`)을 찾아내어, 새로 유입된 질문인 `HumanMessage(content="내 이름이 뭐였지?")`의 맨 앞에 갖다 붙입니다.
+  3. **모델 연산 실행**: 모델은 아래와 같이 완벽히 복원된 3개의 메시지 흐름을 보고 추론하게 됩니다.
+     ```python
+     [
+         HumanMessage(content="안녕, 내 이름은 미나야."),
+         AIMessage(content="반가워요, 미나님!"),
+         HumanMessage(content="내 이름이 뭐였지?")
+     ]
+     ```
+  4. **결과 도출 및 재저장**: 대화 히스토리를 확인한 모델이 정확한 이름("미나")을 찾아 답변을 출력하고, 완성된 4개의 메시지 리스트를 다시 `"room_101"` 키 아래에 덮어씌워 갱신 보존합니다.
+
+---
+
+#### ➌ 세션 격리 확인: 다른 대화 세션 진입 (`thread_id="room_999"`)
+
 ```python
-# 사용자 2용 세션 식별 컨피그 설정
-config_2 = {"configurable": {"thread_id": "user_2"}}
+# 방 번호 식별자를 "room_999"로 다르게 변경하여 동일한 질문을 전송합니다.
+config_other = {"configurable": {"thread_id": "room_999"}}
 
-# 사용자 2가 이전 대화 기억 여부를 확인 (이름을 알려준 적이 없음)
-response_2 = chatbot_graph_with_memory.invoke(
-    {"messages": [("user", "What is my name?")]}, 
-    config=config_2
+response_other = chatbot_graph_with_memory.invoke(
+    {"messages": [("user", "내 이름이 뭐였지?")]}, 
+    config=config_other
 )
-# 출력 결과: "I'm sorry, I don't know your name yet. Could you tell me?"
+# 모델 최종 출력: "죄송하지만 아직 이름을 알려주지 않으셔서 알 수 없습니다."
 ```
-* **동작 원리**: 컨피그 키값이 `"user_2"`로 지정되었으므로, 에이전트는 `"user_1"` 방의 저장소 데이터에 접근하지 않고 독립적으로 분리된 `"user_2"` 전용 대화 공간을 할당받아 대화를 구동합니다. 이 격리 제어를 통해 멀티 세션 간 대화 혼선을 원천적으로 방지합니다.
+
+* **데이터 제어 단계**:
+  1. **기록 탐색 실패**: 에이전가 `"room_999"` 키로 저장소를 탐색하지만 기존에 저장된 데이터가 존재하지 않습니다.
+  2. **무상태 실행**: 복구된 기록 없이 오직 신규 쿼리인 `[HumanMessage(content="내 이름이 뭐였지?")]` 하나만 상태에 담긴 채 모델에 주입됩니다.
+  3. **결과**: 과거 정보를 읽지 못하므로 모델은 이름을 알 수 없다는 고립된 응답을 출력하게 되며, 이로써 사용자 간 대화 기록이 논리적으로 철저히 차단됨이 입증됩니다.
