@@ -22,28 +22,26 @@
 LangSmith는 단순한 로그 수집기가 아닙니다. 개발부터 프로덕션 모니터링까지 전 주기에서 다음 5가지 핵심 컴포넌트를 사용합니다.
 
 ```mermaid
-mindmap
-  root((LangSmith))
-    Runs and Traces
-      Parent-Child 계층 스팬
-      상세 입출력 분석
-      실시간 스트리밍 디버깅
-    Prompt Hub and Playground
-      온라인 프롬프트 관리
-      다양한 LLM 즉시 테스트
-      파라미터 변조 실험
-    Dataset and Evaluation
-      프로덕션 데이터 수집
-      테스트 데이터셋 변환
-      LLM 기반 자동 평가
-    Annotation and Feedback
-      피드백 API 연동
-      인간 레이블러 큐
-      상태 태깅 분석
-    Usage and Cost Analytics
-      실시간 토큰 카운트
-      공급자별 자동 단가 환산
-      지연 시간 병목 구간 파악
+flowchart LR
+    %% LangSmith 5대 핵심 컴포넌트 표준 순서도
+    LS(("LangSmith 플랫폼")) --- RT["1. Runs & Traces"]
+    LS --- PH["2. Prompt Hub & Playground"]
+    LS --- DE["3. Dataset & Evaluation"]
+    LS --- AF["4. Annotation & Feedback"]
+    LS --- UC["5. Usage & Cost Analytics"]
+
+    RT --> RT1("Parent-Child 스팬") & RT2("상세 입출력 분석") & RT3("실시간 스트리밍 디버그")
+    PH --> PH1("온라인 프롬프트 관리") & PH2("다양한 LLM 즉시 테스트") & PH3("파라미터 변조 실험")
+    DE --> DE1("프로덕션 로그 데이터 수집") & DE2("테스트 데이터셋 변환") & DE3("LLM 기반 자동 평가")
+    AF --> AF1("피드백 API 연동") & AF2("인간 레이블러 큐") & AF3("상태 태깅 분석")
+    UC --> UC1("실시간 토큰 카운트") & UC2("공급자별 단가 환산") & UC3("지연 속도 병목 파악")
+
+    style LS fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style RT fill:#e3f2fd,stroke:#1e88e5,stroke-width:1px
+    style PH fill:#e3f2fd,stroke:#1e88e5,stroke-width:1px
+    style DE fill:#e3f2fd,stroke:#1e88e5,stroke-width:1px
+    style AF fill:#e3f2fd,stroke:#1e88e5,stroke-width:1px
+    style UC fill:#e3f2fd,stroke:#1e88e5,stroke-width:1px
 ```
 
 ### ① Runs & Traces (실행 추적)
@@ -121,8 +119,32 @@ mindmap
 2. **트리거 감지**: 패키지가 로드될 때 시스템 환경 변수 `LANGCHAIN_TRACING_V2=true`가 설정되어 있으면, 프레임워크는 내부 콜백 리스너인 `LangSmithTracer` 객체를 기동합니다.
 3. **비동기 패킷 발송**: 컴포넌트가 작동하기 시작하면 이 리스너가 각 라이프사이클 이벤트 훅을 낚아채서 입출력 데이터를 JSON 형태로 캡슐화한 뒤, 백그라운드 스레드를 통해 `LANGCHAIN_ENDPOINT`로 비동기 HTTP POST API 요청을 보냅니다. 따라서 메인 프로세스의 답변 속도를 지연시키지 않고 로그를 실시간 업로드할 수 있습니다.
 
-### 🔍 차이점 3: LangGraph 세션(`thread_id`) vs LangSmith `Trace` 생명주기 매핑
-두 개념은 지속 범위와 목작에 차이가 존재합니다.
+### 🔍 차이점 3: LangGraph 세션(`thread_id`) vs LangSmith `Trace` 수명주기 매핑
+두 개념은 지속 범위와 목적에 차이가 존재합니다.
+
+```mermaid
+flowchart TD
+    %% thread_id 와 Trace 의 수명주기 및 관계 구조화
+    subgraph LangGraph_Memory ["LangGraph 영속 세션 (MemorySaver)"]
+        ThreadID["thread_id: 'user_1'<br/>(대화 컨텍스트 영구 축적)"]
+    end
+
+    subgraph LangSmith_Traces ["LangSmith 단일 트레이스 로그 (Trace Spans)"]
+        Trace1["[Trace A] 사용자 질문 1: 'Hi, I'm Sajal.'<br/>(1회성 트리 생성 후 종료)"]
+        Trace2["[Trace B] 사용자 질문 2: 'What is my name?'<br/>(1회성 트리 생성 후 종료)"]
+        Trace3["[Trace C] 사용자 질문 3: 'What is LangGraph?'<br/>(1회성 트리 생성 후 종료)"]
+    end
+
+    ThreadID -->|질문 1 발생| Trace1
+    ThreadID -->|질문 2 발생| Trace2
+    ThreadID -->|질문 3 발생| Trace3
+
+    style ThreadID fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    style Trace1 fill:#f9fbe7,stroke:#afb42b,stroke-width:1px
+    style Trace2 fill:#f9fbe7,stroke:#afb42b,stroke-width:1px
+    style Trace3 fill:#f9fbe7,stroke:#afb42b,stroke-width:1px
+```
+
 * **LangGraph `thread_id` (예: `"user_1"`)**:
   * **지속성**: 반영구적입니다. 체크포인터(MemorySaver 등) 디바이스에 대화 메시지 상태를 계속 누적시키므로, 다음 날 사용자가 질문해도 동일한 `thread_id`를 입력하면 과거 내역을 기억합니다.
 * **LangSmith `Trace` (단일 트레이스 트리)**:
