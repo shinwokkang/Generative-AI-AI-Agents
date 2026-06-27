@@ -115,6 +115,8 @@ flowchart TD
 
 ## 3. Plan-and-Execute 핵심 코드 세부 지침
 
+처음 파이썬 코드를 보는 사람도 직관적으로 각 파트의 기획 원리를 이해할 수 있도록 쉽게 풀어 설명합니다.
+
 ### ① 상태 관리 정의 (`State` 딕셔너리)
 ```python
 import operator
@@ -127,9 +129,10 @@ class State(TypedDict):
     past_steps: Annotated[list[tuple], operator.add]  # 실행 완료한 태스크와 결과 이력 누적
     response: str                      # 최종 완성된 답변 (비어있지 않으면 종료)
 ```
-* **🔍 기술 해설**: 
-  * `plan`은 실행자가 단계를 끝낼 때마다 앞부분을 잘라내는 슬라이싱(`plan[1:]`)을 거칩니다.
-  * `past_steps`에 달린 `Annotated[..., operator.add]` 리듀서는 새로운 실행 노드의 결과 데이터가 들어올 때, 기존 리스트를 덮어쓰지 않고 뒤에 안전하게 차곡차곡 이어 붙이도록(Append) 지시합니다.
+* **💡 직관적 이해 방법**: 
+  * 이 클래스는 에이전트가 들고 다닐 **'회의 기록용 수첩'**입니다. 
+  * `input`은 **의뢰 내용**, `plan`은 화이트보드에 쓰인 **'오늘의 할 일 목록(To-do List)'**입니다. 실행자는 하나의 단계를 끝낼 때마다 이 리스트에서 첫 항목을 지워나갑니다.
+  * `past_steps`에 적힌 `Annotated[list[tuple], operator.add]`가 매우 중요합니다. 파이썬 기본 리스트는 값을 전달받으면 기존 값을 덮어써서 예전 데이터가 날아가지만, `operator.add`를 붙여주면 LangGraph는 **"이전 회의록 뒤에 새 실행 결과를 덧붙여서 보관하라"**고 인식하여 검색 결과 이력이 안전하게 보존됩니다.
 
 ---
 
@@ -138,21 +141,19 @@ class State(TypedDict):
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-# 1. 출력 규격 정의
 class Plan(BaseModel):
     steps: list[str] = Field(description="목표를 달성하기 위한 단계들의 리스트")
 
-# 2. 프롬프트 작성
 planner_prompt = ChatPromptTemplate.from_messages([
     ("system", "당신은 주어진 질문을 해결하기 위한 계획 수립 전문가입니다. 단계를 쪼개어 나열하세요."),
     ("user", "질문: {input}")
 ])
 
-# 3. 구조화된 출력(Structured Output)이 결합된 체인 빌드
 planner = planner_prompt | llm.with_structured_output(Plan)
 ```
-* **🔍 기술 해설**: 
-  * `llm.with_structured_output(Plan)`은 LLM의 반환값을 JSON 스키마 기반으로 검증하여 `Plan` 객체 타입으로 강제 변환합니다. 이를 통해 신뢰할 수 없는 원시 텍스트 대신 깔끔한 파이썬 `list` 형태의 하위 작업들을 수집합니다.
+* **💡 직관적 이해 방법**:
+  * LLM에게 그냥 질문을 던지면 줄글 형태의 긴 텍스트로 답합니다. 그렇게 되면 컴퓨터가 "1단계 작업"만 따로 떼어서 실습하기가 불가능합니다.
+  * `llm.with_structured_output(Plan)`은 LLM에게 **"답변을 리스트 양식(`['태스크1', '태스크2']`)에 맞춰서만 제출해라"** 하고 포맷 통제 규격을 씌운 것입니다. 덕분에 컴퓨터는 완벽한 리스트 구조를 즉각 반환받아 `plan` 상태값으로 삼게 됩니다.
 
 ---
 
@@ -160,13 +161,11 @@ planner = planner_prompt | llm.with_structured_output(Plan)
 ```python
 from typing import Union
 
-# 최종 응답 완료 규격
 class Response(BaseModel):
-    response: str
+    response: str  # 최종 답변 완료 정보
 
-# 계획 수정 또는 추가 규격
 class Act(BaseModel):
-    action: Union[Response, Plan]
+    action: Union[Response, Plan]  # 최종 답변 혹은 수정된 계획 중 택일
 
 replanner_prompt = ChatPromptTemplate.from_messages([
     ("system", "당신은 완료된 단계와 결과를 바탕으로 계획을 업데이트하는 계획 시스템입니다."),
@@ -175,25 +174,28 @@ replanner_prompt = ChatPromptTemplate.from_messages([
 
 replanner = replanner_prompt | llm.with_structured_output(Act)
 ```
-* **🔍 기술 해설**:
-  * Pydantic의 `Union[Response, Plan]` 구조는 강력한 동적 라우팅 기준이 됩니다.
-  * 모델이 판단하기에 정보가 충분하다면 `Response` 타입의 객체를 반환하고, 정보가 부족해 후속 태스크를 더 해야 한다면 수정된 `Plan` 타입 객체를 반환하도록 구조를 강제합니다.
+* **💡 직관적 이해 방법**:
+  * 리플래너는 매 순간 원래 목표, 남은 계획, 여태껏 찾아낸 결과를 모두 가져와 중간 결산을 봅니다.
+  * 여기서 핵심은 `action: Union[Response, Plan]` 입니다. LLM에게 **"최종 보고서(`Response`)를 써서 종결 지을지, 아니면 일거리를 다시 갱신(`Plan`)할지"** 양자택일(Union) 선택지를 쥐여준 것입니다.
+  * 정보가 부족하면 다음 작업을 위한 `Plan`을 골라 후속 루프를 돌리고, 조사가 끝나면 `Response`를 골라 프로세스를 종결합니다.
 
 ---
 
 ### ④ 조건부 라우터 함수 (`routing_condition`)
 ```python
 def routing_condition(state: State):
-    # 최종 답변이 명시되어 있다면 루프를 정지하고 END로 라우팅
     if state.get("response"):
         return "END"
-    # 남은 계획 리스트가 비어있지 않다면 실행자 노드로 이동
     elif state.get("plan"):
         return "executor"
-    # 계획은 다 썼는데 아직 response가 없다면 재계획 노드로 송출
     else:
         return "replanner"
 ```
+* **💡 직관적 이해 방법**:
+  * 수첩 상태에 따라 다음에 어느 부서로 일을 넘길지 결정하는 **'신호등'** 코드입니다.
+  * `state["response"]`가 채워져 있다면 ➡️ 최종 보고서가 나온 것이므로 즉시 루프 탈출 및 퇴근(`END`).
+  * `state["plan"]` 리스트에 할 일이 남아 있다면 ➡️ 그 일을 처리하기 위해 실행 부서(`executor`) 노드로 제어 이동.
+  * 계획은 전부 비었는데(`plan`이 없음) 아직 최종 보고서(`response`)도 없다면 ➡️ 결산을 보러 재계획 부서(`replanner`) 노드로 제어 이동.
 
 ---
 
