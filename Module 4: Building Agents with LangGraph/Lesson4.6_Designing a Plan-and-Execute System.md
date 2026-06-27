@@ -211,13 +211,85 @@ def routing_condition(state: State):
    OPENAI_API_KEY="your_openai_api_key"
    TAVILY_API_KEY="your_tavily_api_key"  # 웹 검색 실행을 위해 필수
    ```
-3. **노트북 위치 안내**:
-   * **관련 개념 코드 파일**: [lesson_4_c_human_in_the_loop_wait_for_input.ipynb](file:///Users/shinwookkang/Desktop/AI_Agent/Module%204:%20Building%20Agents%20with%20LangGraph/code/lesson_4_c_human_in_the_loop_wait_for_input.ipynb)
-   * **주의**: 현재 로컬 워크스페이스에 있는 `lesson_4_c_...` 파일은 인간 참여형(Human-in-the-loop: Wait for Input) 기능을 담은 파일입니다. 본 과정의 **Plan-and-Execute** 실습 코드는 이 아키텍처를 기반으로 확장하는 다른 예제 파일에서 파생되므로, 실행 시 노드들의 상태 정의(`.with_structured_output()`)와 `Act` Pydantic 결합 부분을 위 상세 코드를 참고하여 빌드하셔야 합니다.
 
 ---
 
-## 5. 핵심 요약 정리 (Cheat Sheet)
+## 5. 실습 소스코드 정밀 분석 및 매핑
+
+새롭게 등록된 실제 실습 노트북 코드의 구성 요소를 라인별로 분석하여 매핑합니다.
+
+* **실습 노트북**: [code/lesson_6_plan_and_execute_system.ipynb](file:///Users/shinwookkang/Desktop/AI_Agent/Module%204:%20Building%20Agents%20with%20LangGraph/code/lesson_6_plan_and_execute_system.ipynb)
+
+### ① 라이브러리 및 모델/도구 셋업 (라인 32 ~ 97)
+* **환경 변수 로드 (라인 52 ~ 55)**:
+  `load_dotenv()`를 호출하여 `.env` 내의 OpenAI 및 Tavily API 키를 파이썬 런타임에 동기화합니다.
+* **LLM 선언 (라인 71 ~ 75)**:
+  ```python
+  llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+  ```
+  계획 수립과 실행 제어를 위해 일관성 있는 구조화 출력을 생성하도록 `temperature=0`으로 고정합니다.
+* **Tavily 도구 바인딩 (라인 90 ~ 95)**:
+  `max_results=3`으로 설정하여 각 도시 검색 시 상위 3개의 검색 결과를 수집하도록 정의합니다.
+
+### ② 수첩 상태 정의 `State` (라인 111 ~ 117)
+```python
+class State(TypedDict):
+    input: str
+    plan: List[str]
+    past_steps: Annotated[List[Tuple[str, str]], operator.add]  # 실행 완료한 (작업, 결과) 리스트
+    response: str
+```
+* **🔍 코드 해설**:
+  * `past_steps`는 튜플들의 리스트(`List[Tuple[str, str]]`) 형태로 정의되어 있습니다. 
+  * `operator.add`에 의해 새로운 노드가 가동하여 결과를 반환할 때마다 `[(현재단계, 검색결과)]`를 기존 회의록 뒤에 이어서 결합시킵니다.
+
+### ③ Planner & Replanner LCEL 체인 (라인 127 ~ 184)
+* **Planner 정의 (라인 132 ~ 146)**:
+  ```python
+  class Plan(BaseModel):
+      steps: List[str] = Field(description="A list of steps to achieve the objective.")
+  # planner = planner_prompt | llm.with_structured_output(Plan)
+  ```
+  사용자가 던진 `input` 쿼리를 하위 작업 리스트인 `Plan` 모델 규격으로 100% 강제 변환합니다.
+* **Replanner 정의 (라인 162 ~ 183)**:
+  ```python
+  class Act(BaseModel):
+      action: Union[Response, Plan] = Field(description="The action to perform next.")
+  # replanner = replanner_prompt | llm.with_structured_output(Act)
+  ```
+  현재까지 완수한 `past_steps`를 분석하여, 작업을 끝마쳐도 된다면 `Response` 객체로 분기하고, 추가 계획이 더 필요하다면 새로운 `Plan`을 생성해 루프를 지속시킵니다.
+
+### ④ 그래프 컴포넌트 노드 및 라우터 정의 (라인 228 ~ 294)
+* **planning_node (라인 232 ~ 238)**:
+  `planner.invoke`를 실행하여 초기 계획을 작성하고, 리스트 형식의 단계를 반환해 `plan` 속성에 할당합니다.
+* **execution_node (라인 241 ~ 255)**:
+  ```python
+  current_step = state["plan"][0]
+  agent_response = execution_agent.invoke({"messages": [("user", agent_input)]})
+  result = agent_response["messages"][-1].content
+  return {
+      "past_steps": [(current_step, result)],
+      "plan": state["plan"][1:] # 이미 수행한 첫 번째 단계를 제거하는 슬라이싱
+  }
+  ```
+  계획의 0번째 단계를 가져와 `create_react_agent`를 통해 도구(Tavily)로 실행을 수행하고, 결과를 `past_steps`에 누적함과 동시에 `plan[1:]`로 작업 목록에서 제거합니다.
+* **replanning_node (라인 257 ~ 267)**:
+  `replanner.invoke(state)`를 호출하여 판단 결과가 `Response` 규격이면 `response`에 답을 할당하고, 수정된 계획(`Plan`)이면 `plan`에 새로운 단계를 덮어씌웁니다.
+* **should_continue 조건부 분기 (라인 270 ~ 286)**:
+  상태값의 `response` 유무와 `plan` 리스트 잔여 여부를 검사해 다음 진행 경로(`executor`, `replanner`, `END`)를 라우팅합니다.
+
+### ⑤ 테스트 가동부 (라인 422 ~ 434)
+```python
+user_query = "Which country will host the next FIFA World Cup, and what are the top three tourist attractions in its capital city?"
+inputs = {"input": user_query}
+events = graph.stream(inputs, config)
+```
+* **🔍 코드 해설**:
+  * 복잡한 질문이 주입되어 `graph.stream`이 실행될 때 각 노드의 `print` 로그가 터미널에 실시간 출력되며, 최종 답변인 `response`가 완성되면 출력 세션에 마크다운 형태로 렌더링되게 설계되어 있습니다.
+
+---
+
+## 6. 핵심 요약 정리 (Cheat Sheet)
 
 | 핵심 항목 | 핵심 기술 내용 | 비고 |
 | :--- | :--- | :--- |
@@ -225,3 +297,4 @@ def routing_condition(state: State):
 | **모델 최적화** | 계획 단계(GPT-4o 등 대형 모델) / 실행 단계(gpt-4o-mini 등 소형 모델) 이중 구성 | 비용 및 지연 속도 대폭 개선 |
 | **상태 누적** | `Annotated[list, operator.add]`를 적용해 과거 단계 결과의 자동 Append 수행 | 상태 유실 방지 |
 | **제어 분기** | `Union[Response, Plan]` 아웃풋 규격으로 답변 완성 시 즉시 탈출 조건 만족 | 라우팅 기준 명확화 |
+| **독립적 수명주기** | LangGraph의 `thread_id` 세션과 LangSmith의 `Trace` 이력은 1:N 관계를 가짐 | 개별 모니터링 로그 독립 적재 |
